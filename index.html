@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>エノン・アトラクター カオスフラクタル</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-gray-100 min-h-screen">
+<div class="max-w-3xl mx-auto px-4 py-6">
+  <header class="text-center mb-6">
+    <h1 class="text-2xl font-bold text-orange-400 mb-1">エノン・アトラクター</h1>
+    <p class="text-gray-500 text-xs">x<sub>n+1</sub> = 1 − ax<sub>n</sub>² + y<sub>n</sub> &nbsp;│&nbsp; y<sub>n+1</sub> = bx<sub>n</sub> &nbsp;│&nbsp; ストレンジ・アトラクター</p>
+  </header>
+
+  <div class="relative mb-4">
+    <canvas id="canvas" width="740" height="460" class="w-full rounded-xl border border-gray-800 bg-black block" aria-label="エノン・アトラクターのプロット"></canvas>
+    <div id="statusOverlay" class="absolute top-2 left-2 text-xs text-gray-500 font-mono" aria-live="polite">描画中...</div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div class="bg-gray-900 rounded-xl p-4">
+      <label for="paramA" class="block text-sm text-orange-400 mb-2">パラメータ a: <span id="valA" class="text-white font-bold">1.4</span></label>
+      <input id="paramA" type="range" min="0.1" max="2.0" step="0.01" value="1.4" class="w-full accent-orange-400" aria-label="パラメータaを設定" oninput="onParamChange()">
+      <div class="text-xs text-gray-600 mt-1">カオス性の強さ（大→複雑化）</div>
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4">
+      <label for="paramB" class="block text-sm text-orange-400 mb-2">パラメータ b: <span id="valB" class="text-white font-bold">0.3</span></label>
+      <input id="paramB" type="range" min="-1.0" max="1.0" step="0.01" value="0.3" class="w-full accent-orange-400" aria-label="パラメータbを設定" oninput="onParamChange()">
+      <div class="text-xs text-gray-600 mt-1">収縮率（|b|<1でアトラクター存在）</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3 mb-4">
+    <div class="bg-gray-900 rounded-xl p-4">
+      <label for="numPoints" class="block text-sm text-gray-400 mb-2">点数: <span id="valPoints" class="text-white font-bold">100,000</span></label>
+      <input id="numPoints" type="range" min="10000" max="500000" step="10000" value="100000" class="w-full accent-gray-400" aria-label="プロット点数" oninput="onParamChange()">
+    </div>
+    <div class="bg-gray-900 rounded-xl p-4">
+      <label for="colorMode" class="block text-sm text-gray-400 mb-2">カラーモード</label>
+      <select id="colorMode" class="w-full bg-gray-800 border border-gray-600 text-gray-100 rounded-lg px-2 py-1 text-sm" aria-label="カラーモードを選択" onchange="onParamChange()">
+        <option value="orange">オレンジ</option>
+        <option value="rainbow">レインボー</option>
+        <option value="heat">ヒートマップ</option>
+        <option value="cyan">シアン</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-2 mb-4">
+    <button onclick="setPreset(1.4, 0.3)" class="bg-orange-900 hover:bg-orange-800 text-orange-200 text-xs py-2 rounded-lg transition" aria-label="クラシック値">クラシック (1.4, 0.3)</button>
+    <button onclick="setPreset(1.3, 0.3)" class="bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs py-2 rounded-lg transition" aria-label="変形1">変形 (1.3, 0.3)</button>
+    <button onclick="setPreset(0.9, 0.5)" class="bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs py-2 rounded-lg transition" aria-label="変形2">変形 (0.9, 0.5)</button>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-xs text-gray-500">
+    <div class="font-bold text-gray-300 mb-1">エノン写像について</div>
+    <p>1976年にミシェル・エノンが提案したカオス系。2次元離散力学系で、フラクタル構造を持つストレンジ・アトラクターを生成する。クラシック値(a=1.4, b=0.3)では無限のカントール集合のような細部構造が現れる。ヤコビアンは|b|で不変。</p>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let drawing = false;
+
+function getColor(mode, t, x, y) {
+  switch(mode) {
+    case 'orange': {
+      const v = Math.floor(180 + 75 * t);
+      return `rgb(${v},${Math.floor(v*0.4)},0)`;
+    }
+    case 'rainbow': {
+      const hue = (t * 360 + (x + 2) * 30) % 360;
+      return `hsl(${hue},100%,60%)`;
+    }
+    case 'heat': {
+      const r = Math.min(255, Math.floor(t * 510));
+      const g = Math.max(0, Math.floor(t * 510 - 255));
+      return `rgb(${r},${g},0)`;
+    }
+    case 'cyan': {
+      const v = Math.floor(100 + 155 * t);
+      return `rgb(0,${v},${v})`;
+    }
+    default: return '#ff8800';
+  }
+}
+
+function plot() {
+  if (drawing) return;
+  drawing = true;
+  document.getElementById('statusOverlay').textContent = '計算中...';
+
+  const a = parseFloat(document.getElementById('paramA').value);
+  const b = parseFloat(document.getElementById('paramB').value);
+  const numPoints = parseInt(document.getElementById('numPoints').value);
+  const colorMode = document.getElementById('colorMode').value;
+
+  const W = canvas.width;
+  const H = canvas.height;
+
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Generate points
+  let x = 0, y = 0;
+  const points = [];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+  // Warmup
+  for (let i = 0; i < 1000; i++) {
+    const nx = 1 - a * x * x + y;
+    const ny = b * x;
+    if (!isFinite(nx) || !isFinite(ny)) { drawing = false; document.getElementById('statusOverlay').textContent = 'パラメータ: アトラクターなし'; return; }
+    x = nx; y = ny;
+  }
+
+  for (let i = 0; i < numPoints; i++) {
+    const nx = 1 - a * x * x + y;
+    const ny = b * x;
+    if (!isFinite(nx) || !isFinite(ny)) break;
+    x = nx; y = ny;
+    points.push([x, y]);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
+  if (points.length < 100) {
+    drawing = false;
+    document.getElementById('statusOverlay').textContent = 'アトラクターなし（発散）';
+    ctx.fillStyle = '#374151';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('このパラメータではアトラクターが存在しません', W/2, H/2);
+    return;
+  }
+
+  const pad = 40;
+  const xScale = (W - 2*pad) / (maxX - minX);
+  const yScale = (H - 2*pad) / (maxY - minY);
+
+  const imgData = ctx.createImageData(W, H);
+  const data = imgData.data;
+
+  points.forEach(([px, py], i) => {
+    const cx = Math.round(pad + (px - minX) * xScale);
+    const cy = Math.round(H - pad - (py - minY) * yScale);
+    if (cx < 0 || cx >= W || cy < 0 || cy >= H) return;
+    const t = i / points.length;
+    const idx = (cy * W + cx) * 4;
+    // Accumulate brightness
+    if (data[idx + 3] < 200) {
+      if (colorMode === 'orange') {
+        data[idx] = Math.min(255, data[idx] + 40);
+        data[idx+1] = Math.min(255, data[idx+1] + 15);
+        data[idx+2] = 0;
+        data[idx+3] = Math.min(255, data[idx+3] + 20);
+      } else if (colorMode === 'rainbow') {
+        const hue = t * 360;
+        const [r,g,b2] = hslToRgb(hue/360, 1, 0.6);
+        data[idx] = Math.min(255, data[idx] + r/5);
+        data[idx+1] = Math.min(255, data[idx+1] + g/5);
+        data[idx+2] = Math.min(255, data[idx+2] + b2/5);
+        data[idx+3] = Math.min(255, data[idx+3] + 20);
+      } else if (colorMode === 'heat') {
+        data[idx] = Math.min(255, data[idx] + 40);
+        data[idx+1] = Math.min(100, data[idx+1] + 10);
+        data[idx+2] = 0;
+        data[idx+3] = Math.min(255, data[idx+3] + 20);
+      } else {
+        data[idx] = 0;
+        data[idx+1] = Math.min(255, data[idx+1] + 30);
+        data[idx+2] = Math.min(255, data[idx+2] + 30);
+        data[idx+3] = Math.min(255, data[idx+3] + 20);
+      }
+    }
+  });
+
+  ctx.putImageData(imgData, 0, 0);
+
+  // Labels
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '11px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('a=' + a.toFixed(2) + '  b=' + b.toFixed(2) + '  points=' + points.length.toLocaleString(), 8, 16);
+  ctx.fillText('xn+1 = 1 - axn² + yn', 8, H - 20);
+  ctx.fillText('yn+1 = bxn', 8, H - 8);
+
+  document.getElementById('statusOverlay').textContent = points.length.toLocaleString() + '点';
+  drawing = false;
+}
+
+function hslToRgb(h, s, l) {
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+function onParamChange() {
+  document.getElementById('valA').textContent = parseFloat(document.getElementById('paramA').value).toFixed(2);
+  document.getElementById('valB').textContent = parseFloat(document.getElementById('paramB').value).toFixed(2);
+  document.getElementById('valPoints').textContent = parseInt(document.getElementById('numPoints').value).toLocaleString();
+  setTimeout(plot, 10);
+}
+
+function setPreset(a, b) {
+  document.getElementById('paramA').value = a;
+  document.getElementById('paramB').value = b;
+  onParamChange();
+}
+
+window.onload = () => { onParamChange(); };
+</script>
+</body>
+</html>
